@@ -9,7 +9,7 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras.utils import to_categorical
 
 # Load dataset
-df = pd.read_csv("dataset.csv")
+df = pd.read_csv("training/dataset/vehicle_dataset_large.csv")
 
 # Target column
 target = "Product_Category"

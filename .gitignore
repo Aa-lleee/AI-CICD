@@ -1,3 +1,10 @@
-models/ 
-__pycache__/ 
-*.pyc 
+__pycache__/
+*.pyc
+
+# datasets
+training/dataset/*.csv
+
+# optional (if large)
+# model_artifacts/
+
+.env
