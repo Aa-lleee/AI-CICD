@@ -1,3 +1,4 @@
+# CI pipeline for AI app
 name: CI Pipeline
 
 on:
