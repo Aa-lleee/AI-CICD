@@ -38,7 +38,7 @@ y = df[target]
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
-# Convert labels to categorical
+# Convert labels
 y_cat = to_categorical(y)
 
 # Build model
@@ -54,7 +54,7 @@ model.compile(
     metrics=['accuracy']
 )
 
-# Train
+# Train model
 model.fit(X_scaled, y_cat, epochs=20, batch_size=32)
 
 # Save artifacts
@@ -64,4 +64,4 @@ model.save("model_artifacts/vehicle_model.h5")
 joblib.dump(scaler, "model_artifacts/scaler.pkl")
 joblib.dump(encoders, "model_artifacts/encoders.pkl")
 
-print("Model and artifacts saved!")
+print("✅ Model and artifacts saved successfully!")

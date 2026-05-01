@@ -11,7 +11,7 @@ from tensorflow.keras.models import load_model
 
 app = FastAPI()
 
-# Template setup
+# Templates
 templates = Jinja2Templates(directory="app/templates")
 
 # Model paths
@@ -22,7 +22,7 @@ scaler = None
 encoders = None
 CLASSES = None
 
-# Safe model loading (important for CI/CD)
+# Safe model loading
 try:
     if os.path.exists(BASE):
         model = load_model(os.path.join(BASE, "vehicle_model.h5"))
@@ -35,7 +35,7 @@ try:
 except Exception as e:
     print(f"❌ Model load failed: {e}")
 
-# Icons mapping
+# Icons
 ICONS = {
     "Bike": "🏍️",
     "Hatchback": "🚗",
@@ -57,7 +57,7 @@ class InputData(BaseModel):
     loan: float
     outstanding: float
 
-# Serve frontend UI
+# UI
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -67,13 +67,12 @@ def home(request: Request):
 def health():
     return {"status": "ok"}
 
-# Prediction endpoint
+# Prediction
 @app.post("/predict")
 def predict(data: InputData):
 
-    # Safety check
-    if model is None or scaler is None or encoders is None:
-        return {"error": "Model not loaded properly"}
+    if model is None:
+        return {"error": "Model not loaded"}
 
     try:
         d = data.dict()
@@ -86,10 +85,8 @@ def predict(data: InputData):
             'Customer_Geo'
         ]
 
-        # Encode categorical features
         encoded = [encoders[c].transform([d[c]])[0] for c in cat_cols]
 
-        # Prepare input row
         row = np.array([[
             float(d['age']),
             float(d['income']),
@@ -103,14 +100,11 @@ def predict(data: InputData):
             float(d['outstanding'])
         ]])
 
-        # Scale input
         row_scaled = scaler.transform(row)
 
-        # Predict
         probs = model.predict(row_scaled, verbose=0)[0]
         pred = CLASSES[np.argmax(probs)]
 
-        # Confidence scores
         confidence = {
             cls: round(float(p) * 100, 1)
             for cls, p in zip(CLASSES, probs)

@@ -1,10 +1,32 @@
+
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# datasets
+# Virtual environments
+venv/
+.env/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dataset (DO NOT push datasets)
 training/dataset/*.csv
+data/
 
-# optional (if large)
+# Logs
+*.log
+
+# Optional: ignore models if large (uncomment if needed)
 # model_artifacts/
 
-.env
+# Docker
+*.tar
+
+# IDE files
+.vscode/
+.idea/
