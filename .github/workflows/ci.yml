@@ -52,6 +52,13 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             sudo docker pull ${{ secrets.DOCKER_USERNAME }}/ai-cicd-app:latest
-            sudo docker stop ai-app || true
+
+            # Stop ALL containers using port 8000
+            sudo docker ps -q --filter "publish=8000" | xargs -r sudo docker stop
+            sudo docker ps -aq --filter "publish=8000" | xargs -r sudo docker rm
+
+            # Remove old container (just in case)
             sudo docker rm ai-app || true
+
+            # Run new container
             sudo docker run -d -p 8000:8000 --name ai-app ${{ secrets.DOCKER_USERNAME }}/ai-cicd-app:latest
