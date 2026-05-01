@@ -23,3 +23,7 @@ jobs:
         run: |
           export PYTHONPATH=.
           pytest
+
+      # 👇 NEW STEP
+      - name: Build Docker image
+        run: docker build -t ai-cicd-app .
