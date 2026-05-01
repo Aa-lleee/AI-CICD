@@ -19,4 +19,7 @@ jobs:
 
       - run: python training/train.py
 
-      - run: pytest
+      - name: Run tests
+        run: |
+          export PYTHONPATH=.
+          pytest
