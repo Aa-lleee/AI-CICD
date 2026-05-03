@@ -163,18 +163,24 @@ jobs:
             # Pull latest image from Docker Hub
             docker pull ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-            # Stop and remove old container
+            # Stop ANY container using port 8000 (including old ai-app)
+            docker ps -q --filter publish=8000 | xargs -r docker stop
+            docker ps -aq --filter publish=8000 | xargs -r docker rm
+
+            # Stop by name just in case
             docker stop vehicleiq || true
             docker rm   vehicleiq || true
+            docker stop ai-app    || true
+            docker rm   ai-app    || true
 
-            # Run new container
+            # Run new vehicleiq container
             docker run -d \
               --name vehicleiq \
               --restart unless-stopped \
               -p 8000:8000 \
               ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-            # Health check — wait up to 30 seconds
+            # Health check - wait up to 30 seconds
             for i in $(seq 1 6); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null; then
