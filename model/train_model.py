@@ -16,8 +16,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 
 # ── 1. Load Dataset ───────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-df = pd.read_csv(os.path.join(BASE_DIR, "vehicle_dataset_large.csv"))
+df = pd.read_csv("vehicle_dataset_large.csv")
 print(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
 
 # ── 2. Feature Selection ──────────────────────────────────────────────────────
@@ -88,8 +87,8 @@ print(confusion_matrix(y_test, y_pred))
 
 # ── 8. Save Artifacts ─────────────────────────────────────────────────────────
 os.makedirs("model_artifacts", exist_ok=True)
-joblib.dump(clf,      "model_artifacts/vehicle_model.pkl")
-joblib.dump(scaler,   "model_artifacts/scaler.pkl")
+joblib.dump(clf, "model_artifacts/vehicle_model.pkl")
+joblib.dump(scaler, "model_artifacts/scaler.pkl")
 joblib.dump(encoders, "model_artifacts/encoders.pkl")
 print("\n✅ Artifacts saved to model_artifacts/")
 print("  vehicle_model.pkl")
@@ -103,9 +102,9 @@ FEATURE_NAMES = FEATURES
 def predict_vehicle(age, income, gender, marital_status, occupation,
                     geo, state, ethnic, loan_amount, price):
     """Run a quick prediction using saved artifacts."""
-    clf_   = joblib.load("model_artifacts/vehicle_model.pkl")
-    sc_    = joblib.load("model_artifacts/scaler.pkl")
-    enc_   = joblib.load("model_artifacts/encoders.pkl")
+    clf_ = joblib.load("model_artifacts/vehicle_model.pkl")
+    sc_ = joblib.load("model_artifacts/scaler.pkl")
+    enc_ = joblib.load("model_artifacts/encoders.pkl")
 
     row = [[
         age, income,
