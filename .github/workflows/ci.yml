@@ -69,8 +69,19 @@ jobs:
           python-version: "3.10"
           cache: pip
 
+      # FIXED: requirements.txt previously omitted tensorflow entirely, causing
+      # `import app` to fail with ModuleNotFoundError in the smoke test.
+      # We install the CPU-only wheel here — it is ~10x smaller than the full
+      # GPU wheel and more than sufficient for mocked unit tests.
       - name: Install dependencies
-        run: pip install -r ../requirements.txt --quiet
+        run: |
+          pip install --quiet \
+            flask==3.0.3 \
+            scikit-learn==1.4.2 \
+            pandas==2.2.2 \
+            numpy==1.26.4 \
+            joblib==1.4.2 \
+            tensorflow-cpu==2.15.0
 
       - name: Smoke-test Flask /predict route
         run: |
@@ -99,6 +110,8 @@ jobs:
                mock.patch("joblib.load", side_effect=[sc, enc]):
               import app as vehicleiq_app
               client = vehicleiq_app.app.test_client()
+
+              # Happy-path test
               resp = client.post("/predict", json={
                   "age": 35, "income": 150000,
                   "Customer_Gender": "Male",
@@ -111,6 +124,27 @@ jobs:
               assert "confidence"     in data
               assert "top_confidence" in data
               print("Smoke test passed:", data["prediction"])
+
+              # FIXED: also test the new input-validation paths added to app.py
+              bad_age = client.post("/predict", json={
+                  "age": -5, "income": 150000,
+                  "Customer_Gender": "Male",
+                  "Customer_Marital_Status": "Married",
+                  "Occupation": "IT Professional"
+              })
+              assert bad_age.status_code == 400, \
+                  f"Expected 400 for out-of-range age, got {bad_age.status_code}"
+              print("Validation test passed: out-of-range age correctly rejected")
+
+              bad_income = client.post("/predict", json={
+                  "age": 35, "income": 999999999,
+                  "Customer_Gender": "Male",
+                  "Customer_Marital_Status": "Married",
+                  "Occupation": "IT Professional"
+              })
+              assert bad_income.status_code == 400, \
+                  f"Expected 400 for out-of-range income, got {bad_income.status_code}"
+              print("Validation test passed: out-of-range income correctly rejected")
           PYEOF
 
 # ── Job 3: Build & Push to Docker Hub ────────────────────────────────────────
@@ -127,8 +161,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: docker.io
-          username: ${{ secrets.DOCKER_USERNAME }}   # ← your secret
-          password: ${{ secrets.DOCKER_PASSWORD }}   # ← your secret
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -155,12 +189,11 @@ jobs:
       - name: Deploy via SSH to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.EC2_HOST }}          # ← your secret
-          username: ubuntu                           # default EC2 username
-          key:      ${{ secrets.EC2_SSH_KEY }}       # ← your secret
+          host:     ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key:      ${{ secrets.EC2_SSH_KEY }}
           port:     22
           script: |
-            # Pull latest image from Docker Hub
             docker pull ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
             # Stop ANY container using port 8000 (including old ai-app)
