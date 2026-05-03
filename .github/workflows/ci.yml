@@ -160,14 +160,6 @@ jobs:
           key:      ${{ secrets.EC2_SSH_KEY }}
           port:     22
           script: |
-            # ── FIXED: free disk space BEFORE pulling ──────────────────────
-            # The tensorflow base image is ~3-4 GB. Without cleanup, previous
-            # deployments fill the disk and the pull fails with:
-            #   "no space left on device"
-            #
-            # Removes: stopped containers, dangling image layers, build cache.
-            # Does NOT touch images used by any currently-running container,
-            # so the live app stays up during the cleanup step.
             echo "=== Disk before cleanup ===" && df -h /
             docker container prune -f
             docker image prune -f
@@ -178,7 +170,6 @@ jobs:
             docker pull ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
             # ── Stop the old container ─────────────────────────────────────
-            # Stop any container on port 8000 first (catches renamed containers)
             docker ps -q --filter publish=8000 | xargs -r docker stop
             docker ps -aq --filter publish=8000 | xargs -r docker rm
 
@@ -187,7 +178,6 @@ jobs:
             docker stop ai-app    || true
             docker rm   ai-app    || true
 
-            # Old image is now unused — safe to remove to free more space
             docker image rm ${{ env.IMAGE_NAME }}:latest || true
 
             # ── Start the new container ────────────────────────────────────
@@ -197,12 +187,25 @@ jobs:
               -p 8000:8000 \
               ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-            # ── Health check — wait up to 30 seconds ──────────────────────
-            for i in $(seq 1 6); do
-              sleep 5
+            # ── Health check ───────────────────────────────────────────────
+            # FIXED: TensorFlow needs 40-60s to load the model on EC2.
+            # Previous timeout was 30s (6 x 5s) — too short, always failed.
+            # New timeout is 2 minutes (12 x 10s) which is enough for TF
+            # to fully initialise even on a t2/t3 micro instance.
+            echo "Waiting for VehicleIQ to start (up to 2 minutes)..."
+            for i in $(seq 1 12); do
+              sleep 10
               if curl -sf http://localhost:8000/health > /dev/null; then
-                echo "VehicleIQ is healthy"
+                echo "VehicleIQ is healthy (attempt $i)"
                 exit 0
               fi
+              echo "  attempt $i/12 — not ready yet"
             done
-            echo "Health check failed" && exit 1
+
+            # ── FIXED: print container logs on failure so you can debug ───
+            # Previously the pipeline just printed "Health check failed"
+            # with no indication of what went wrong inside the container.
+            echo ""
+            echo "=== Health check failed — container logs ==="
+            docker logs --tail 50 vehicleiq
+            exit 1
