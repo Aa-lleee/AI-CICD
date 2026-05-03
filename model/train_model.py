@@ -150,5 +150,5 @@ def predict_vehicle(age, income, gender, marital_status, occupation):
 
 # Quick test
 pred, conf = predict_vehicle(35, 150000, 'Male', 'Married', 'IT Professional')
-print(f"\nSample Prediction: {pred}")
+print(f"\nSample Prediction : {pred}")
 print(f"Confidence : {conf}")
