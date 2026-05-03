@@ -1,24 +1,16 @@
 FROM python:3.10-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libhdf5-dev \
-        libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir --ignore-installed -r requirements.txt
+# Pin TensorFlow to a stable version that matches your training environment
+RUN pip install tensorflow==2.15.0 keras==2.15.0
 
-COPY model/model_artifacts/   model_artifacts/
-COPY model/app.py             .
-COPY model/templates/         templates/
-COPY model/static/            static/
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY model/ ./model/
+COPY app.py .
 
 EXPOSE 8000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--workers", "2", "--bind", "0.0.0.0:8000", "--timeout", "120", "app:app"]
