@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# CI/CD Pipeline — VehicleIQ AI Application
+# CI/CD Pipeline — VehicleIQ v2  (FastAPI + scikit-learn, no TensorFlow)
 # TCS iON Industry Project | Alen George | Yenepoya University
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -29,22 +29,21 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           cache: pip
 
       - name: Install flake8
         run: pip install flake8 --quiet
 
-      - name: Fix missing newline at end of files
+      - name: Ensure files end with newline
         run: |
           python3 -c "
-          import sys
           for f in ['app.py', 'train_model.py']:
               content = open(f).read()
-              fixed = content.rstrip() + '\n'
-              open(f, 'w').write(fixed)
-              print(f'Fixed: {f}')
+              open(f, 'w').write(content.rstrip() + '\n')
+              print(f'Checked: {f}')
           "
+
       - name: Lint app.py
         run: flake8 app.py --max-line-length=120 --ignore=E501,W503
 
@@ -65,49 +64,72 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           cache: pip
 
       - name: Install dependencies
         run: pip install -r ../requirements.txt --quiet
 
-      - name: Smoke-test Flask /predict route
+      - name: Smoke-test FastAPI /predict route
         run: |
           python - <<'PYEOF'
           import numpy as np
           import unittest.mock as mock
           from sklearn.preprocessing import LabelEncoder, StandardScaler
-          dummy_model = mock.MagicMock()
-          dummy_model.predict.return_value = np.array([[0.1, 0.5, 0.2, 0.1, 0.1]])
+          from sklearn.ensemble import GradientBoostingClassifier
+          from fastapi.testclient import TestClient
+
+          # Build tiny real model (no mocking needed — sklearn is fast)
           enc = {}
           for col, vals in [
-              ("Customer_Gender",         ["Female","Male"]),
-              ("Customer_Marital_Status", ["Married","Single"]),
+              ("Customer_Gender",         ["Female", "Male"]),
+              ("Customer_Marital_Status", ["Married", "Single"]),
               ("Occupation",              ["Business","Doctor","Driver","Engineer",
                                            "Farmer","Government Employee",
                                            "IT Professional","Lawyer","Retired","Teacher"]),
+              ("Customer_Geo",            ["Rural","Semi-Urban","Urban"]),
+              ("Cust_State",              ["Kerala","Delhi","Maharashtra"]),
+              ("Cust_Ethnic",             ["Group A","Group B","Group C","Group D"]),
               ("Product_Category",        ["Bike","Hatchback","SUV","Sedan","Truck"]),
           ]:
               le = LabelEncoder(); le.fit(vals); enc[col] = le
-          sc = StandardScaler(); sc.fit(np.zeros((1,5)))
-          with mock.patch("tensorflow.keras.models.load_model", return_value=dummy_model), \
-               mock.patch("joblib.load", side_effect=[sc, enc]):
+
+          sc = StandardScaler()
+          sc.fit(np.zeros((1, 10)))
+
+          clf = GradientBoostingClassifier(n_estimators=5, random_state=42)
+          X_dummy = np.random.rand(50, 10)
+          y_dummy = np.tile([0, 1, 2, 3, 4], 10)
+          clf.fit(X_dummy, y_dummy)
+
+          with mock.patch("joblib.load", side_effect=[clf, sc, enc]):
               import app as vehicleiq_app
-              client = vehicleiq_app.app.test_client()
+              client = TestClient(vehicleiq_app.app)
               resp = client.post("/predict", json={
                   "age": 35, "income": 150000,
                   "Customer_Gender": "Male",
                   "Customer_Marital_Status": "Married",
-                  "Occupation": "IT Professional"
+                  "Occupation": "IT Professional",
+                  "Customer_Geo": "Urban",
+                  "Cust_State": "Kerala",
+                  "Cust_Ethnic": "Group B",
+                  "loan_amount": 80000,
+                  "price": 1200000,
               })
-              assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
-              data = resp.get_json()
+              assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+              data = resp.json()
               assert "prediction"     in data
               assert "confidence"     in data
               assert "top_confidence" in data
-              print("Smoke test passed:", data["prediction"])
+              print("✅ Smoke test passed:", data["prediction"])
+
+          # Health check
+          resp2 = client.get("/health")
+          assert resp2.status_code == 200
+          print("✅ Health check passed")
           PYEOF
-# ── Job 3: Build & Push to Docker Hub ────────────────────────────────────────
+
+# ── Job 3: Build & Push ───────────────────────────────────────────────────────
   build:
     name: Build & Push Image
     runs-on: ubuntu-latest
@@ -121,8 +143,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: docker.io
-          username: ${{ secrets.DOCKER_USERNAME }}   # ← your secret
-          password: ${{ secrets.DOCKER_PASSWORD }}   # ← your secret
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -130,8 +152,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file:    Dockerfile
-          push:    true
+          file: Dockerfile
+          push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -149,28 +171,46 @@ jobs:
       - name: Deploy via SSH to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.EC2_HOST }}          # ← your secret
-          username: ubuntu                           # default EC2 username
-          key:      ${{ secrets.EC2_SSH_KEY }}       # ← your secret
+          host:     ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key:      ${{ secrets.EC2_SSH_KEY }}
           port:     22
           script: |
-            # Pull latest image from Docker Hub
+            echo "=== Disk before cleanup ===" && df -h /
+            docker container prune -f
+            docker image prune -f
+            echo "=== Disk after cleanup ===" && df -h /
+
+            # ── Pull new image ─────────────────────────────────────────────
             docker pull ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-            # Stop and remove old container
+
+            # ── Stop old container ─────────────────────────────────────────
+            docker ps -q --filter publish=8000 | xargs -r docker stop
+            docker ps -aq --filter publish=8000 | xargs -r docker rm
             docker stop vehicleiq || true
             docker rm   vehicleiq || true
-            # Run new container
+            docker image rm ${{ env.IMAGE_NAME }}:latest || true
+
+            # ── Start new container ────────────────────────────────────────
             docker run -d \
               --name vehicleiq \
               --restart unless-stopped \
               -p 8000:8000 \
               ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-            # Health check — wait up to 30 seconds
+
+            # ── Health check ───────────────────────────────────────────────
+            # sklearn loads in <2s vs TF's 40-60s — 30s total is plenty
+            echo "Waiting for VehicleIQ to start..."
             for i in $(seq 1 6); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null; then
-                echo "VehicleIQ is healthy"
+                echo "✅ VehicleIQ is healthy (attempt $i)"
                 exit 0
               fi
+              echo "  attempt $i/6 — not ready yet"
             done
-            echo "Health check failed" && exit 1
+
+            echo ""
+            echo "=== Health check failed — container logs ==="
+            docker logs --tail 50 vehicleiq
+            exit 1

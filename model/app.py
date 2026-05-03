@@ -1,79 +1,109 @@
 """
-Flask Web Application - Vehicle Buying Trend Predictor
-TCS ION Industry Project | Alen George | Yenepoya University
-Run:  python app.py  ->  open http://127.0.0.1:8000
+VehicleIQ — FastAPI Backend
+TCS iON Industry Project | Alen George | Yenepoya University
+
+Stack : FastAPI + scikit-learn (pkl) — zero TensorFlow
+Run   : uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 """
+
 import os
 import numpy as np
 import joblib
-from flask import Flask, request, jsonify, render_template
-import tensorflow as tf
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.requests import Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
-app = Flask(__name__)
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(title="VehicleIQ", version="2.0.0")
 
-# Load model artifacts once at startup
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+# ── Load Artifacts Once at Startup ────────────────────────────────────────────
 BASE = os.path.join(os.path.dirname(__file__), "model_artifacts")
-model = tf.keras.models.load_model(os.path.join(BASE, "vehicle_model.h5"))
-scaler = joblib.load(os.path.join(BASE, "scaler.pkl"))
+model    = joblib.load(os.path.join(BASE, "vehicle_model.pkl"))
+scaler   = joblib.load(os.path.join(BASE, "scaler.pkl"))
 encoders = joblib.load(os.path.join(BASE, "encoders.pkl"))
-CLASSES = encoders['Product_Category'].classes_
+CLASSES  = encoders["Product_Category"].classes_
 
-# Vehicle display metadata - emoji icon + image filename
 VEHICLE_META = {
-    "Bike": {"icon": "🏍️", "image": "bike.png"},
-    "Hatchback": {"icon": "🚗", "image": "hatchback.png"},
-    "Sedan": {"icon": "🚙", "image": "sedan.png"},
-    "SUV": {"icon": "🚐", "image": "suv.png"},
-    "Truck": {"icon": "🚚", "image": "truck.png"},
+    "Bike":      {"icon": "🏍️",  "image": "bike.png"},
+    "Hatchback": {"icon": "🚗",  "image": "hatchback.png"},
+    "Sedan":     {"icon": "🚙",  "image": "sedan.png"},
+    "SUV":       {"icon": "🚐",  "image": "suv.png"},
+    "Truck":     {"icon": "🚚",  "image": "truck.png"},
 }
 
+# ── Request Schema ────────────────────────────────────────────────────────────
+class PredictRequest(BaseModel):
+    age:                     float = Field(..., gt=0, lt=120, example=35)
+    income:                  float = Field(..., gt=0, example=150000)
+    Customer_Gender:         str   = Field(..., example="Male")
+    Customer_Marital_Status: str   = Field(..., example="Married")
+    Occupation:              str   = Field(..., example="IT Professional")
+    Customer_Geo:            str   = Field(..., example="Urban")
+    Cust_State:              str   = Field(..., example="Kerala")
+    Cust_Ethnic:             str   = Field(..., example="Group B")
+    loan_amount:             float = Field(..., gt=0, example=80000)
+    price:                   float = Field(..., gt=0, example=1200000)
 
-@app.route("/")
-def index():
-    return render_template("index.html")
+# ── Routes ────────────────────────────────────────────────────────────────────
+@app.get("/")
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
-@app.route("/predict", methods=["POST"])
-def predict():
+@app.post("/predict")
+async def predict(body: PredictRequest):
     try:
-        d = request.get_json(force=True)
+        g   = encoders["Customer_Gender"].transform([body.Customer_Gender])[0]
+        ms  = encoders["Customer_Marital_Status"].transform([body.Customer_Marital_Status])[0]
+        oc  = encoders["Occupation"].transform([body.Occupation])[0]
+        geo = encoders["Customer_Geo"].transform([body.Customer_Geo])[0]
+        st  = encoders["Cust_State"].transform([body.Cust_State])[0]
+        eth = encoders["Cust_Ethnic"].transform([body.Cust_Ethnic])[0]
 
-        # Validate required keys
-        required = ["age", "income", "Customer_Gender",
-                    "Customer_Marital_Status", "Occupation"]
-        missing = [k for k in required if k not in d]
-        if missing:
-            return jsonify({"error": f"Missing fields: {missing}"}), 400
+        row = np.array([[
+            body.age, body.income, g, ms, oc,
+            geo, st, eth, body.loan_amount, body.price,
+        ]])
+        probs = model.predict_proba(scaler.transform(row))[0]
 
-        # Encode categorical inputs
-        g = encoders['Customer_Gender'].transform([d['Customer_Gender']])[0]
-        ms = encoders['Customer_Marital_Status'].transform([d['Customer_Marital_Status']])[0]
-        oc = encoders['Occupation'].transform([d['Occupation']])[0]
+        pred       = CLASSES[np.argmax(probs)]
+        confidence = {cls: round(float(p) * 100, 1) for cls, p in zip(CLASSES, probs)}
+        meta       = VEHICLE_META.get(pred, {"icon": "🚗", "image": ""})
 
-        row = np.array([[float(d['age']), float(d['income']), g, ms, oc]])
-        probs = model.predict(scaler.transform(row), verbose=0)[0]
+        return {
+            "prediction":     pred,
+            "icon":           meta["icon"],
+            "image":          meta["image"],
+            "confidence":     confidence,
+            "top_confidence": round(float(np.max(probs)) * 100, 1),
+        }
 
-        pred = CLASSES[np.argmax(probs)]
-        conf = {cls: round(float(p) * 100, 1) for cls, p in zip(CLASSES, probs)}
-        meta = VEHICLE_META.get(pred, {"icon": "🚗", "image": ""})
-
-        return jsonify({
-            "prediction": pred,
-            "icon": meta["icon"],
-            "image": meta["image"],
-            "confidence": conf,
-            "top_confidence": round(float(np.max(probs)) * 100, 1)
-        })
-
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"}), 200
+@app.get("/health")
+async def health():
+    return {"status": "ok", "model": "GradientBoosting", "version": "2.0.0"}
 
 
-if __name__ == "__main__":
-    print("VehicleIQ running at http://127.0.0.1:8000")
-    app.run(debug=False, host="0.0.0.0", port=8000)
+@app.get("/meta")
+async def meta():
+    """Return valid enum values for the frontend dropdowns."""
+    return {
+        "genders":         list(encoders["Customer_Gender"].classes_),
+        "marital_statuses": list(encoders["Customer_Marital_Status"].classes_),
+        "occupations":     list(encoders["Occupation"].classes_),
+        "geos":            list(encoders["Customer_Geo"].classes_),
+        "states":          list(encoders["Cust_State"].classes_),
+        "ethnics":         list(encoders["Cust_Ethnic"].classes_),
+        "categories":      list(CLASSES),
+    }
