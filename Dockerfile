@@ -1,26 +1,24 @@
-FROM python:3.10-slim
+FROM tensorflow/tensorflow:2.15.0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
- 
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libhdf5-dev \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
- 
+
 WORKDIR /app
- 
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir --ignore-installed -r requirements.txt \
- && pip install --no-cache-dir gunicorn
- 
+ && pip install --no-cache-dir --ignore-installed -r requirements.txt
+
 COPY model/model_artifacts/   model_artifacts/
 COPY model/app.py             .
 COPY model/templates/         templates/
 COPY model/static/            static/
- 
+
 EXPOSE 8000
- 
+
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "app:app"]
- 
