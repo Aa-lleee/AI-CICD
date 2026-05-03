@@ -1,3 +1,8 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD Pipeline — VehicleIQ AI Application
+# TCS iON Industry Project | Alen George | Yenepoya University
+# ─────────────────────────────────────────────────────────────────────────────
+
 name: VehicleIQ CI/CD
 
 on:
@@ -29,6 +34,17 @@ jobs:
 
       - name: Install flake8
         run: pip install flake8 --quiet
+
+      - name: Fix missing newline at end of files
+        run: |
+          python3 -c "
+          import sys
+          for f in ['app.py', 'train_model.py']:
+              content = open(f).read()
+              fixed = content.rstrip() + '\n'
+              open(f, 'w').write(fixed)
+              print(f'Fixed: {f}')
+          "
 
       - name: Lint app.py
         run: flake8 app.py --max-line-length=120 --ignore=E501,W503
