@@ -4,7 +4,6 @@ TCS ION Industry Project | Alen George | Yenepoya University
 Run:  python app.py  ->  open http://127.0.0.1:8000
 """
 import os
-import sys
 import numpy as np
 import joblib
 from flask import Flask, request, jsonify, render_template
@@ -12,38 +11,20 @@ import tensorflow as tf
 
 app = Flask(__name__)
 
-# ── FIXED: wrap model loading in a clear startup guard ──────────────────────
-# If model_artifacts/ is missing (wrong Docker COPY path, pre-training run),
-# the previous version crashed with a raw OSError at import time. This gives
-# a clear error message instead.
+# Load model artifacts once at startup
 BASE = os.path.join(os.path.dirname(__file__), "model_artifacts")
-try:
-    model = tf.keras.models.load_model(os.path.join(BASE, "vehicle_model.h5"))
-    scaler = joblib.load(os.path.join(BASE, "scaler.pkl"))
-    encoders = joblib.load(os.path.join(BASE, "encoders.pkl"))
-except (OSError, FileNotFoundError) as e:
-    print(
-        f"[VehicleIQ] ERROR: Could not load model artifacts from '{BASE}'.\n"
-        f"  Make sure you have run train_model.py and that model_artifacts/ "
-        f"exists next to app.py.\n  Detail: {e}",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
+model = tf.keras.models.load_model(os.path.join(BASE, "vehicle_model.h5"))
+scaler = joblib.load(os.path.join(BASE, "scaler.pkl"))
+encoders = joblib.load(os.path.join(BASE, "encoders.pkl"))
 CLASSES = encoders['Product_Category'].classes_
-
-# ── Training-data bounds for input validation ──────────────────────────────
-# These match the slider ranges in index.html and the training CSV range.
-AGE_MIN, AGE_MAX = 18, 70
-INCOME_MIN, INCOME_MAX = 15_000, 200_000
 
 # Vehicle display metadata - emoji icon + image filename
 VEHICLE_META = {
-    "Bike":     {"icon": "🏍️", "image": "bike.png"},
+    "Bike": {"icon": "🏍️", "image": "bike.png"},
     "Hatchback": {"icon": "🚗", "image": "hatchback.png"},
-    "Sedan":    {"icon": "🚙", "image": "sedan.png"},
-    "SUV":      {"icon": "🚐", "image": "suv.png"},
-    "Truck":    {"icon": "🚚", "image": "truck.png"},
+    "Sedan": {"icon": "🚙", "image": "sedan.png"},
+    "SUV": {"icon": "🚐", "image": "suv.png"},
+    "Truck": {"icon": "🚚", "image": "truck.png"},
 }
 
 
@@ -64,39 +45,12 @@ def predict():
         if missing:
             return jsonify({"error": f"Missing fields: {missing}"}), 400
 
-        # ── FIXED: validate numeric ranges ──────────────────────────────────
-        # Previously, any numeric value (negative, out-of-range) was accepted
-        # silently, producing unreliable predictions or confusing stack traces.
-        try:
-            age = float(d['age'])
-            income = float(d['income'])
-        except (ValueError, TypeError):
-            return jsonify({"error": "age and income must be numeric"}), 400
-
-        if not (AGE_MIN <= age <= AGE_MAX):
-            return jsonify({
-                "error": f"age must be between {AGE_MIN} and {AGE_MAX}"
-            }), 400
-
-        if not (INCOME_MIN <= income <= INCOME_MAX):
-            return jsonify({
-                "error": (
-                    f"income must be between {INCOME_MIN:,} "
-                    f"and {INCOME_MAX:,}"
-                )
-            }), 400
-
         # Encode categorical inputs
-        try:
-            g = encoders['Customer_Gender'].transform([d['Customer_Gender']])[0]
-            ms = encoders['Customer_Marital_Status'].transform(
-                [d['Customer_Marital_Status']]
-            )[0]
-            oc = encoders['Occupation'].transform([d['Occupation']])[0]
-        except ValueError as e:
-            return jsonify({"error": f"Invalid category value: {e}"}), 400
+        g = encoders['Customer_Gender'].transform([d['Customer_Gender']])[0]
+        ms = encoders['Customer_Marital_Status'].transform([d['Customer_Marital_Status']])[0]
+        oc = encoders['Occupation'].transform([d['Occupation']])[0]
 
-        row = np.array([[age, income, g, ms, oc]])
+        row = np.array([[float(d['age']), float(d['income']), g, ms, oc]])
         probs = model.predict(scaler.transform(row), verbose=0)[0]
 
         pred = CLASSES[np.argmax(probs)]
@@ -104,11 +58,11 @@ def predict():
         meta = VEHICLE_META.get(pred, {"icon": "🚗", "image": ""})
 
         return jsonify({
-            "prediction":     pred,
-            "icon":           meta["icon"],
-            "image":          meta["image"],
-            "confidence":     conf,
-            "top_confidence": round(float(np.max(probs)) * 100, 1),
+            "prediction": pred,
+            "icon": meta["icon"],
+            "image": meta["image"],
+            "confidence": conf,
+            "top_confidence": round(float(np.max(probs)) * 100, 1)
         })
 
     except Exception as e:

@@ -11,11 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-# FIXED: removed --ignore-installed which would conflict with the
-# tensorflow already installed in the base image once TF is in requirements.txt.
-# The base image provides tensorflow==2.15.0; pip will skip reinstalling it.
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir --ignore-installed -r requirements.txt
 
 COPY model/model_artifacts/   model_artifacts/
 COPY model/app.py             .
