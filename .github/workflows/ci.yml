@@ -1,0 +1,174 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD Pipeline — VehicleIQ AI Application
+# TCS iON Industry Project | Alen George | Yenepoya University
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: VehicleIQ CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/vehicleiq
+  IMAGE_TAG:  ${{ github.sha }}
+
+# ── Job 1: Lint ───────────────────────────────────────────────────────────────
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: model
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install flake8
+        run: pip install flake8 --quiet
+
+      - name: Lint app.py
+        run: flake8 app.py --max-line-length=120 --ignore=E501,W503
+
+      - name: Lint train_model.py
+        run: flake8 train_model.py --max-line-length=120 --ignore=E501,W503
+
+# ── Job 2: Test ───────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    defaults:
+      run:
+        working-directory: model
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r ../requirements.txt --quiet
+
+      - name: Smoke-test Flask /predict route
+        run: |
+          python - <<'PYEOF'
+          import numpy as np
+          import unittest.mock as mock
+          from sklearn.preprocessing import LabelEncoder, StandardScaler
+
+          dummy_model = mock.MagicMock()
+          dummy_model.predict.return_value = np.array([[0.1, 0.5, 0.2, 0.1, 0.1]])
+
+          enc = {}
+          for col, vals in [
+              ("Customer_Gender",         ["Female","Male"]),
+              ("Customer_Marital_Status", ["Married","Single"]),
+              ("Occupation",              ["Business","Doctor","Driver","Engineer",
+                                           "Farmer","Government Employee",
+                                           "IT Professional","Lawyer","Retired","Teacher"]),
+              ("Product_Category",        ["Bike","Hatchback","SUV","Sedan","Truck"]),
+          ]:
+              le = LabelEncoder(); le.fit(vals); enc[col] = le
+
+          sc = StandardScaler(); sc.fit(np.zeros((1,5)))
+
+          with mock.patch("tensorflow.keras.models.load_model", return_value=dummy_model), \
+               mock.patch("joblib.load", side_effect=[sc, enc]):
+              import app as vehicleiq_app
+              client = vehicleiq_app.app.test_client()
+              resp = client.post("/predict", json={
+                  "age": 35, "income": 150000,
+                  "Customer_Gender": "Male",
+                  "Customer_Marital_Status": "Married",
+                  "Occupation": "IT Professional"
+              })
+              assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+              data = resp.get_json()
+              assert "prediction"     in data
+              assert "confidence"     in data
+              assert "top_confidence" in data
+              print("Smoke test passed:", data["prediction"])
+          PYEOF
+
+# ── Job 3: Build & Push to Docker Hub ────────────────────────────────────────
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}   # ← your secret
+          password: ${{ secrets.DOCKER_PASSWORD }}   # ← your secret
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: model
+          file:    model/Dockerfile
+          push:    true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+# ── Job 4: Deploy to EC2 ──────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy via SSH to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.EC2_HOST }}          # ← your secret
+          username: ubuntu                           # default EC2 username
+          key:      ${{ secrets.EC2_SSH_KEY }}       # ← your secret
+          port:     22
+          script: |
+            # Pull latest image from Docker Hub
+            docker pull ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+            # Stop and remove old container
+            docker stop vehicleiq || true
+            docker rm   vehicleiq || true
+
+            # Run new container
+            docker run -d \
+              --name vehicleiq \
+              --restart unless-stopped \
+              -p 8000:8000 \
+              ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+            # Health check — wait up to 30 seconds
+            for i in $(seq 1 6); do
+              sleep 5
+              if curl -sf http://localhost:8000/health > /dev/null; then
+                echo "VehicleIQ is healthy"
+                exit 0
+              fi
+            done
+            echo "Health check failed" && exit 1
