@@ -121,7 +121,7 @@ print(confusion_matrix(y_test, y_pred))
 
 # 11. Save Artifacts
 os.makedirs("model_artifacts", exist_ok=True)
-model.save("model_artifacts/vehicle_model.h5")
+model.save("model_artifacts/vehicle_model.keras")
 joblib.dump(scaler, "model_artifacts/scaler.pkl")
 joblib.dump(encoders, "model_artifacts/encoders.pkl")
 print("\nModel and artifacts saved to model_artifacts/")
