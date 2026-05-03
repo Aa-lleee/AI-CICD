@@ -127,8 +127,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: docker.io
-          username: ${{ secrets.DOCKER_USERNAME }}   # ← your secret
-          password: ${{ secrets.DOCKER_PASSWORD }}   # ← your secret
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -155,32 +155,49 @@ jobs:
       - name: Deploy via SSH to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.EC2_HOST }}          # ← your secret
-          username: ubuntu                           # default EC2 username
-          key:      ${{ secrets.EC2_SSH_KEY }}       # ← your secret
+          host:     ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key:      ${{ secrets.EC2_SSH_KEY }}
           port:     22
           script: |
-            # Pull latest image from Docker Hub
+            # ── FIXED: free disk space BEFORE pulling ──────────────────────
+            # The tensorflow base image is ~3-4 GB. Without cleanup, previous
+            # deployments fill the disk and the pull fails with:
+            #   "no space left on device"
+            #
+            # Removes: stopped containers, dangling image layers, build cache.
+            # Does NOT touch images used by any currently-running container,
+            # so the live app stays up during the cleanup step.
+            echo "=== Disk before cleanup ===" && df -h /
+            docker container prune -f
+            docker image prune -f
+            docker builder prune -f
+            echo "=== Disk after cleanup ===" && df -h /
+
+            # ── Pull the new image ─────────────────────────────────────────
             docker pull ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-            # Stop ANY container using port 8000 (including old ai-app)
+            # ── Stop the old container ─────────────────────────────────────
+            # Stop any container on port 8000 first (catches renamed containers)
             docker ps -q --filter publish=8000 | xargs -r docker stop
             docker ps -aq --filter publish=8000 | xargs -r docker rm
 
-            # Stop by name just in case
             docker stop vehicleiq || true
             docker rm   vehicleiq || true
             docker stop ai-app    || true
             docker rm   ai-app    || true
 
-            # Run new vehicleiq container
+            # Old image is now unused — safe to remove to free more space
+            docker image rm ${{ env.IMAGE_NAME }}:latest || true
+
+            # ── Start the new container ────────────────────────────────────
             docker run -d \
               --name vehicleiq \
               --restart unless-stopped \
               -p 8000:8000 \
               ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
-            # Health check - wait up to 30 seconds
+            # ── Health check — wait up to 30 seconds ──────────────────────
             for i in $(seq 1 6); do
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null; then
