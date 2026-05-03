@@ -45,7 +45,6 @@ jobs:
               open(f, 'w').write(fixed)
               print(f'Fixed: {f}')
           "
-
       - name: Lint app.py
         run: flake8 app.py --max-line-length=120 --ignore=E501,W503
 
@@ -78,10 +77,8 @@ jobs:
           import numpy as np
           import unittest.mock as mock
           from sklearn.preprocessing import LabelEncoder, StandardScaler
-
           dummy_model = mock.MagicMock()
           dummy_model.predict.return_value = np.array([[0.1, 0.5, 0.2, 0.1, 0.1]])
-
           enc = {}
           for col, vals in [
               ("Customer_Gender",         ["Female","Male"]),
@@ -92,9 +89,7 @@ jobs:
               ("Product_Category",        ["Bike","Hatchback","SUV","Sedan","Truck"]),
           ]:
               le = LabelEncoder(); le.fit(vals); enc[col] = le
-
           sc = StandardScaler(); sc.fit(np.zeros((1,5)))
-
           with mock.patch("tensorflow.keras.models.load_model", return_value=dummy_model), \
                mock.patch("joblib.load", side_effect=[sc, enc]):
               import app as vehicleiq_app
@@ -112,7 +107,6 @@ jobs:
               assert "top_confidence" in data
               print("Smoke test passed:", data["prediction"])
           PYEOF
-
 # ── Job 3: Build & Push to Docker Hub ────────────────────────────────────────
   build:
     name: Build & Push Image
@@ -127,8 +121,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: docker.io
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKER_USERNAME }}   # ← your secret
+          password: ${{ secrets.DOCKER_PASSWORD }}   # ← your secret
 
       - uses: docker/setup-buildx-action@v3
 
@@ -155,57 +149,28 @@ jobs:
       - name: Deploy via SSH to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key:      ${{ secrets.EC2_SSH_KEY }}
+          host:     ${{ secrets.EC2_HOST }}          # ← your secret
+          username: ubuntu                           # default EC2 username
+          key:      ${{ secrets.EC2_SSH_KEY }}       # ← your secret
           port:     22
           script: |
-            echo "=== Disk before cleanup ===" && df -h /
-            docker container prune -f
-            docker image prune -f
-            docker builder prune -f
-            echo "=== Disk after cleanup ===" && df -h /
-
-            # ── Pull the new image ─────────────────────────────────────────
+            # Pull latest image from Docker Hub
             docker pull ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-            # ── Stop the old container ─────────────────────────────────────
-            docker ps -q --filter publish=8000 | xargs -r docker stop
-            docker ps -aq --filter publish=8000 | xargs -r docker rm
-
+            # Stop and remove old container
             docker stop vehicleiq || true
             docker rm   vehicleiq || true
-            docker stop ai-app    || true
-            docker rm   ai-app    || true
-
-            docker image rm ${{ env.IMAGE_NAME }}:latest || true
-
-            # ── Start the new container ────────────────────────────────────
+            # Run new container
             docker run -d \
               --name vehicleiq \
               --restart unless-stopped \
               -p 8000:8000 \
               ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-            # ── Health check ───────────────────────────────────────────────
-            # FIXED: TensorFlow needs 40-60s to load the model on EC2.
-            # Previous timeout was 30s (6 x 5s) — too short, always failed.
-            # New timeout is 2 minutes (12 x 10s) which is enough for TF
-            # to fully initialise even on a t2/t3 micro instance.
-            echo "Waiting for VehicleIQ to start (up to 2 minutes)..."
-            for i in $(seq 1 12); do
-              sleep 10
+            # Health check — wait up to 30 seconds
+            for i in $(seq 1 6); do
+              sleep 5
               if curl -sf http://localhost:8000/health > /dev/null; then
-                echo "VehicleIQ is healthy (attempt $i)"
+                echo "VehicleIQ is healthy"
                 exit 0
               fi
-              echo "  attempt $i/12 — not ready yet"
             done
-
-            # ── FIXED: print container logs on failure so you can debug ───
-            # Previously the pipeline just printed "Health check failed"
-            # with no indication of what went wrong inside the container.
-            echo ""
-            echo "=== Health check failed — container logs ==="
-            docker logs --tail 50 vehicleiq
-            exit 1
+            echo "Health check failed" && exit 1
