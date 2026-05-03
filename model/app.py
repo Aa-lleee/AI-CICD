@@ -13,7 +13,7 @@ app = Flask(__name__)
 
 # Load model artifacts once at startup
 BASE = os.path.join(os.path.dirname(__file__), "model_artifacts")
-model = tf.keras.models.load_model(os.path.join(BASE, "vehicle_model.keras"))
+model = tf.keras.models.load_model(os.path.join(BASE, "vehicle_model.h5"))
 scaler = joblib.load(os.path.join(BASE, "scaler.pkl"))
 encoders = joblib.load(os.path.join(BASE, "encoders.pkl"))
 CLASSES = encoders['Product_Category'].classes_
