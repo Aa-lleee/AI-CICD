@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 # Copy application code
 COPY model/app.py              .
-COPY model/model_artifacts/    model_artifacts/
+COPY model_artifacts/    model_artifacts/
 COPY model/templates/          templates/
 COPY model/static/             static/
 
