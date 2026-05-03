@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:2.15.0
+FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
