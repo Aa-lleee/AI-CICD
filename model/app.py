@@ -3,6 +3,7 @@ Flask Web Application — Vehicle Buying Trend Predictor
 TCS ION Industry Project | Alen George | Yenepoya University
 Run:  python app.py  →  open http://127.0.0.1:8000
 """
+
 import os
 import numpy as np
 import joblib

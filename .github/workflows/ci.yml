@@ -1,8 +1,3 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# CI/CD Pipeline — VehicleIQ AI Application
-# TCS iON Industry Project | Alen George | Yenepoya University
-# ─────────────────────────────────────────────────────────────────────────────
-
 name: VehicleIQ CI/CD
 
 on:
